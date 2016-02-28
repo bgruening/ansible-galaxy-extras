@@ -39,7 +39,7 @@ http {
 {% if nginx_proxy_reports %}
         # enable reports under :80/reports/
         # if the file /etc/nginx/htpasswd exists authentification is enabled
-        location /reports/ {
+        location {{ nginx_reports_location }} {
             set $auth "Galaxy reports are restricted. Please contact your administrator.";
 
             if (!-f /etc/nginx/htpasswd) {
@@ -48,23 +48,23 @@ http {
 
             auth_basic $auth;
             auth_basic_user_file htpasswd;
-            proxy_pass http://127.0.0.1:{{ nginx_proxy_reports_port }}/;
+            proxy_pass http://127.0.0.1:{{ galaxy_reports_port }};
         }
         # serve static content for report app
-        location /reports/static {
-            alias /galaxy-central/static;
+        location  {{ nginx_reports_location }}/static {
+            alias {{ galaxy_server_dir }}/static;
             gzip on;
             gzip_types text/plain text/xml text/javascript text/css application/x-javascript;
             expires 24h;
         }
-        location /reports/static/style {
-            alias /galaxy-central/static/style/blue;
+        location {{ nginx_reports_location }}/static/style {
+            alias {{ galaxy_server_dir }}/static/style/blue;
             gzip on;
             gzip_types text/plain text/xml text/javascript text/css application/x-javascript;
             expires 24h;
         }
-        location /reports/static/scripts {
-            alias /galaxy-central/static/scripts/packed;
+        location {{ nginx_reports_location }}/static/scripts {
+            alias {{ galaxy_server_dir }}/static/scripts/packed;
             gzip on;
             gzip_types text/plain text/javascript application/x-javascript;
             expires 24h;
@@ -82,57 +82,70 @@ http {
         include {{ nginx_conf_directory }}/ide.conf;
 {% endif %}
 
+{% for a in nginx_additional_config %}
+        include {{ nginx_conf_directory }}/{{ a }}.conf;
+{% endfor %}
 {% if nginx_serve_planemo_machine_web %}
-        location /planemo {
+        location {{ nginx_planemo_web_location }} {
             alias {{ planemo_machine_web_dir }};
         }
 {% endif %}
 
         # serve static content
-        location /static {
-            alias {{ galaxy_root }}/static;
+        location {{ nginx_galaxy_location }}/static {
+            alias {{ galaxy_server_dir }}/static;
             gzip on;
             gzip_types text/plain text/xml text/javascript text/css application/x-javascript;
             expires 24h;
         }
-        location /static/style {
-            alias {{ galaxy_root }}/static/style/blue;
+        location {{ nginx_galaxy_location }}/static/style {
+            alias {{ galaxy_server_dir }}/static/style/blue;
             gzip on;
             gzip_types text/plain text/xml text/javascript text/css application/x-javascript;
             expires 24h;
         }
-        location /static/scripts {
-            alias {{ galaxy_root }}/static/scripts/packed;
+        location {{ nginx_galaxy_location }}/static/scripts {
+            alias {{ galaxy_server_dir }}/static/scripts/packed;
             gzip on;
             gzip_types text/plain text/javascript application/x-javascript;
             expires 24h;
         }
 
         # delegated downloads
-        location /_x_accel_redirect {
+        location {{ nginx_galaxy_location }}/_x_accel_redirect {
             internal;
             alias /;
         }
 
-        # this is needed if 'welcome_url' is set to /etc/galaxy
-        location /root/welcome {
-            alias /etc/galaxy;
-            index welcome.html;
+        # this is needed if 'welcome_url' is set to /etc/galaxy/web
+        location {{ nginx_galaxy_location }}/etc/galaxy/web {
+            alias /etc/galaxy/web;
             gzip on;
             gzip_types text/plain text/xml text/javascript text/css application/x-javascript;
             expires 24h;
         }
 
-        location ~ ^/plugins/visualizations/ipython/static/(?<static_file>.*?)$ {
-            alias {{ galaxy_root }}/config/plugins/interactive_environments/ipython/static/$static_file;
-        }
-        location ~ ^/plugins/visualizations/(?<vis_name>.+?)/static/(?<static_file>.*?)$ {
-            alias {{ galaxy_root }}/config/plugins/visualizations/$vis_name/static/$static_file;
+        location {{ nginx_interactive_environment_location }} {
+            proxy_pass http://localhost:8800/{{ nginx_interactive_environment_location }};
+            proxy_redirect off;
         }
 
+        # IPython specific. Other IEs may require their own routes.
+        location {{ nginx_interactive_environment_location }}/ipython/api/kernels {
+            proxy_pass http://localhost:8800/{{ nginx_interactive_environment_location }}/ipython/api/kernels;
+            proxy_redirect off;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
 
+        location ~ ^{{ nginx_galaxy_location }}/plugins/(?<plug_type>.+?)/(?<vis_name>.+?)/static/(?<static_file>.*?)$ {
+            alias {{ galaxy_server_dir }}/config/plugins/$plug_type/$vis_name/static/$static_file;
+        }
+
+{% if galaxy_extras_config_nginx_upload == True %}
         # delegated uploads
-        location /_upload {
+        location {{ nginx_galaxy_location }}/_upload {
             upload_store {{ nginx_upload_store_path }};
             upload_store_access user:rw;
             upload_pass_form_field "";
@@ -141,20 +154,20 @@ http {
             upload_set_form_field "${upload_field_name}_name" "$upload_file_name";
             upload_set_form_field "${upload_field_name}_path" "$upload_tmp_path";
             upload_pass_args on;
-            upload_pass /_upload_done;
+            upload_pass {{ nginx_galaxy_location }}/_upload_done;
         }
-        location /_upload_done {
-            set $dst /api/tools;
+        location {{ nginx_galaxy_location }}/_upload_done {
+            set $dst {{ nginx_galaxy_location }}/api/tools;
             if ($args ~ nginx_redir=([^&]+)) {
                 set $dst $1;
             }
             rewrite "" $dst;
         }
-
-        error_page 502  /502.html;
-        location = /502.html {
+{% endif  %}
+        error_page 502  {{ nginx_prefix_location }}/502.html;
+        location = {{ nginx_prefix_location }}/502.html {
             root  /root/;
-            proxy_intercept_errors on; 
+            proxy_intercept_errors on;
         }
 
 

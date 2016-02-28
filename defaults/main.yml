@@ -2,11 +2,20 @@
 # https://github.com/bgruening/docker-galaxy-stable.
 
 galaxy_extras_config_nginx: true
+galaxy_extras_config_nginx_upload: true
 galaxy_extras_config_proftpd: true
 galaxy_extras_config_slurm: true
+galaxy_extras_config_pbs: false
 galaxy_extras_config_supervisor: true
 galaxy_extras_config_galaxy_root: true
 galaxy_extras_config_galaxy_job_metrics: true
+galaxy_extras_config_uwsgi: true
+galaxy_extras_config_ie_proxy: true
+galaxy_extras_config_scripts: true
+galaxy_extras_config_startup: true
+
+# set the FQDN for the pbs server, only used when galaxy_extras_config_pbs: true
+pbs_server_name: pbsqueue
 
 # Install OS packages corresponding to each service being configured.
 galaxy_extras_install_packages: false
@@ -14,27 +23,51 @@ galaxy_extras_install_packages: false
 # be 'present' or 'latest'.
 galaxy_extras_apt_package_state: present
 
+galaxy_extras_ie_fetch_ipython: false
+galaxy_extras_ie_ipython_image: bgruening/docker-ipython-notebook:dev
+galaxy_extras_ie_fetch_jupyter: false
+galaxy_extras_ie_jupyter_image: bgruening/docker-jupyter-notebook:16.01
+galaxy_extras_ie_fetch_rstudio: false
+galaxy_extras_ie_rstudio_image: erasche/docker-rstudio-notebook:15.10
+
+# The storage backend to use for docker-in-docker.
+# aufs on parent docker cannot be combined with aufs in child docker
+galaxy_extras_docker_storage_backend: aufs
+
 galaxy_docker_enabled: false
 galaxy_docker_sudo: false
 galaxy_docker_volumes_from: galaxy
-
-galaxy_log_dir: /home/galaxy/
+galaxy_docker_volumes : "$defaults"
 
 # Point at the existing Galaxy configuration.
-galaxy_root: "/galaxy-central"
-galaxy_job_conf_path: "{{galaxy_root}}/config/job_conf.xml"
-galaxy_job_metrics_conf_path: "{{galaxy_root}}/config/job_metrics_conf.xml"
-galaxy_venv_dir: /home/galaxy/venv
-galxy_egg_cache: /home/galaxy/.python-eggs
+galaxy_server_dir: "/galaxy-central"
+galaxy_job_conf_path: "{{ galaxy_server_dir }}/config/job_conf.xml"
+galaxy_job_metrics_conf_path: "{{ galaxy_server_dir }}/config/job_metrics_conf.xml"
 galaxy_user_name: "galaxy"
-galaxy_config_dir: "{{ galaxy_root }}/config"
+galaxy_home_dir: "/home/{{ galaxy_user_name }}"
+galaxy_source_shellrc: false
+galaxy_user_shellrc: "{{ galaxy_home_dir }}/.bashrc"
+galaxy_log_dir: "{{ galaxy_home_dir }}/"
+galaxy_venv_dir: "{{ galaxy_home_dir }}/venv"
+galxy_egg_cache: "{{ galaxy_home_dir }}/.python-eggs"
+
+galaxy_config_dir: "{{ galaxy_server_dir }}/config"
 galaxy_reports_config_file: "{{ galaxy_config_dir }}/reports_wsgi.ini"
+galaxy_toolshed_config_file: "{{ galaxy_config_dir }}/tool_shed.ini"
 galaxy_config_file: "{{ galaxy_config_dir }}/galaxy.ini"
 galaxy_reports_port: "9001"
+
+galaxy_db_port: "5432"
+galaxy_database_connection: "postgres://{{ galaxy_user_name }}@localhost:{{ galaxy_db_port }}/galaxy"
 
 # Port to serve uwsgi on.
 galaxy_uwsgi: true
 uwsgi_port: 4001
+
+# Set to true to write thread/process number into supervisor config. If false, uses environmental variables.
+galaxy_uwsgi_static_conf: false
+# number of uwsgi threads to use if galaxy_uwsgi_static_conf is true
+uwsgi_threads: 2
 
 # Set the following to true - to run paste processes for Galaxy
 # handlers (should not longer be needed).
@@ -42,19 +75,35 @@ galaxy_paste_handlers: false
 galaxy_web_processes: 2
 galaxy_handler_processes: 2
 
+startup_export_user_files: true
+startup_chown_on_directory: ""
+
 # Nginx configuration.
 nginx_conf_path: /etc/nginx/nginx.conf
 nginx_conf_directory: /etc/nginx/conf.d
 nginx_upload_store_path: "/tmp/nginx_upload_store"
 
+# Use nginx_*_location variables to control serving apps at subdirectories.
+# If galaxy should be served at subdirectory (e.g. example.com/galaxy) set nginx_galaxy_location: /galaxy
+# If all apps should be served on a common subdirectory, use nginx_prefix_location: /your_common_dir
+nginx_prefix_location: ""
+nginx_galaxy_location: "{{ nginx_prefix_location }}"
+nginx_interactive_environment_location: "{{ nginx_galaxy_location }}/gie_proxy"
+nginx_reports_location: "{{ nginx_prefix_location }}/reports"
+nginx_planemo_web_location: "{{ nginx_prefix_location }}/planemo"
+nginx_ide_location: "{{ nginx_prefix_location }}/ide"
+
 ## Development Box Configuration
 # Configure nginx to setup a proxy to an IDE.
 nginx_proxy_ide: false
 codebox_port: 8991
+
+# Additional configurations to be appended to nginx config
+nginx_additional_config : []
+
 # Configure proxy to planemo-machine-web.
 nginx_serve_planemo_machine_web: false
 nginx_proxy_reports: true
-nginx_proxy_reports_port: "9003"
 
 galaxy_job_metrics_core: true
 galaxy_job_metrics_env: false
@@ -71,19 +120,40 @@ proftpd_db_username: galaxy
 proftpd_db_password: galaxy
 proftpd_welcome: "Public Galaxy FTP"
 proftpd_files_dir: /export/galaxy-central/database/ftp
+proftpd_passive_port_low: 30000
+proftpd_passive_port_high: 40000
+# Set masquearade to true if host is NAT'ed.
+proftpd_nat_masquerade: false
+# proftpd_masquerade_address refefers to the ip that clients use to establish an ftp connection.
+# Can be a command that returns an IP or an IP address and applies only if proftpd_nat_masquerade is true.
+# ec2metadata --public-ipv4 returns the public ip for amazon's ec2 service.
+proftpd_masquerade_address: "`ec2metadata --public-ipv4`"
 
 ## Supervisor Configuration.
 supervisor_conf_path: "/etc/supervisor/conf.d/galaxy.conf"
 supervisor_manage_slurm: true
+supervisor_manage_uwsgi: true
 supervisor_slurm_config_dir: "/home/galaxy"
 supervisor_manage_postgres: true
-supervisor_postgres_database_path: "/export/postgresql/9.3/main"
+postgresql_version: 9.3
+supervisor_postgres_database_path: "/export/postgresql/{{ postgresql_version }}/main"
+supervisor_postgres_options: "-D {{ supervisor_postgres_database_path }}"
 supervisor_manage_proftp: true
 supervisor_manage_nginx: true
 supervisor_manage_reports: true
-supervisor_manage_nodeproxy: true
+supervisor_manage_ie_proxy: true
 supervisor_manage_docker: true
+supervisor_manage_nodeproxy: true
+supervisor_manage_toolshed: false
 
+supervisor_galaxy_startsecs: 20
+# had to increase retries to ensure the postgres database is available,
+# wasn't needed in the past.
+supervisor_galaxy_startretries: 15
+
+supervisor_ie_proxy_autostart: false
+supervisor_reports_autostart: false
+supervisor_proftpd_autostart: false
 supervisor_docker_autostart: false
 supervisor_docker_autorestart: true
 
@@ -91,3 +161,5 @@ supervisor_webserver: true
 supervisor_webserver_port: "0.0.0.0:9002"
 supervisor_webserver_username: null
 supervisor_webserver_password: changeme
+
+use_pbkdf2: false
