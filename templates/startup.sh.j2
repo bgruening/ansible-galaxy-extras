@@ -14,6 +14,10 @@ umount /var/lib/docker
 python /usr/local/bin/export_user_files.py $PG_DATA_DIR_DEFAULT
 {% endif %}
 
+if [ -e /usr/bin/autoupgrade_db.sh ]; then
+    /usr/bin/autoupgrade_db.sh
+fi
+
 # Enable Test Tool Shed
 if [ "x$ENABLE_TTS_INSTALL" != "x" ]
     then
